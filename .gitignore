@@ -1,0 +1,27 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Virtual environments
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# Testing
+.pytest_cache/
+.coverage
+
+# Data (don't commit large files)
+data/output/*
+!data/output/.gitkeep
+*.log
+
+# Spark
+metastore_db/
+warehouse/
+derby.log

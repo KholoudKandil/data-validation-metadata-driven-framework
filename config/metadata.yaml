@@ -1,0 +1,42 @@
+dataflows:
+  - name: dataflow1
+    sources:
+      - name: person_inputs
+        path: "data/input/person.json"
+        format: JSON
+    
+    transformations:
+      - name: validation
+        type: validate_fields
+        params:
+          input: person_inputs
+          validations:
+            - field: office
+              validations:
+                - notEmpty
+            - field: age
+              validations:
+                - notNull
+      
+      - name: ok_with_date
+        type: add_fields
+        params:
+          input: person_inputs_ok
+          addFields:
+            - name: dt
+              function: current_timestamp
+    
+    sinks:
+      - input: ok_with_date
+        name: raw-ok
+        paths:
+          - "data/output/person_ok"
+        format: DELTA
+        saveMode: OVERWRITE
+      
+      - input: person_inputs_ko
+        name: raw-ko
+        paths:
+          - "data/output/person_ko"
+        format: DELTA
+        saveMode: OVERWRITE

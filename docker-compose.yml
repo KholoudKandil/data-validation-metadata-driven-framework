@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  spark-dev:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: metadata-framework-dev
+    volumes:
+      # Mount source code (live editing)
+      - ./src:/app/src
+      - ./tests:/app/tests
+      - ./config:/app/config
+      # Mount data directories
+      - ./data/input:/app/data/input
+      - ./data/output:/app/data/output
+    environment:
+      PYTHONUNBUFFERED: 1
+    working_dir: /app
+    command: /bin/bash
+    stdin_open: true
+    tty: true
