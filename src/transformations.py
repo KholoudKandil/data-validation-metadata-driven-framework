@@ -26,8 +26,8 @@ def transform_validate_fields(
         - validation rules per field
     
     Output:
-        - '{name}_ok': rows that passed all validations
-        - '{name}_ko': rows that failed, with error messages
+        - 'validation_ok': rows that passed all validations
+        - 'validation_ko': rows that failed, with error messages
     
     Args:
         df: Input DataFrame
@@ -37,7 +37,7 @@ def transform_validate_fields(
         dataframes: Dict of available DataFrames
     
     Returns:
-        Dict with '_ok' and '_ko' versions of DataFrame
+        Dict with 'validation_ok' and 'validation_ko' versions of DataFrame
     """
     validations_config = params.get('validations', [])
     
@@ -46,11 +46,17 @@ def transform_validate_fields(
     
     # Build validation expression: check all fields
     validation_results = {}
-    error_cols = []
+    error_expressions = []
     
     for field_config in validations_config:
         field_name = field_config['field']
         field_validations = field_config['validations']
+        
+        # Check if field exists
+        if field_name not in df.columns:
+            raise ConfigurationError(
+                f"Field '{field_name}' not found in DataFrame. Available: {df.columns}"
+            )
         
         # Apply all validations for this field
         is_valid = apply_validations(df, field_name, field_validations)
@@ -58,7 +64,7 @@ def transform_validate_fields(
         
         # Build error message for this field
         error_msg = F.when(~is_valid, f"{field_name} can't be blank")
-        error_cols.append(error_msg)
+        error_expressions.append(error_msg)
     
     # Combine all field checks: valid if ALL pass
     all_valid = None
@@ -68,25 +74,33 @@ def transform_validate_fields(
         else:
             all_valid = all_valid & is_valid
     
+    if all_valid is None:
+        all_valid = F.lit(True)
+    
     # Split into OK and KO
     df_ok = df.filter(all_valid)
     
     # Add error message column to failed rows
-    df_ko = df.filter(~all_valid).withColumn(
-        'error code',
-        F.concat_ws(' | ', *[col for col in error_cols if col is not None])
+    # Use concat_ws to combine error messages
+    error_col = F.concat_ws(
+        ' | ',
+        *[expr for expr in error_expressions if expr is not None]
     )
     
+    df_ko = df.filter(~all_valid).withColumn('error_code', error_col)
+    
+    # Return with hardcoded names matching config specification
     return {
-        f"{params['input']}_ok": df_ok,
-        f"{params['input']}_ko": df_ko,
+        "validation_ok": df_ok,
+        "validation_ko": df_ko,
     }
 
 
 def transform_add_fields(
     df: DataFrame,
     params: Dict[str, Any],
-    dataframes: Dict[str, DataFrame]
+    dataframes: Dict[str, DataFrame],
+    transformation_name: str = None
 ) -> Dict[str, DataFrame]:
     """
     Add new columns to DataFrame.
@@ -101,9 +115,10 @@ def transform_add_fields(
             - input: DataFrame reference name
             - addFields: list of {name, function, params?}
         dataframes: Dict of available DataFrames
+        transformation_name: Name of this transformation (for output naming)
     
     Returns:
-        Dict with new DataFrame (same name as input)
+        Dict with new DataFrame named after transformation
     """
     add_fields_config = params.get('addFields', [])
     
@@ -131,8 +146,8 @@ def transform_add_fields(
         field_func = field_functions[function_name]
         result_df = result_df.withColumn(field_name, field_func())
     
-    return {params['input']: result_df}
-
+    # Return with transformation name as the key
+    return {transformation_name: result_df}
 
 # Transformation registry (extensible)
 TRANSFORMATIONS: Dict[str, Callable] = {

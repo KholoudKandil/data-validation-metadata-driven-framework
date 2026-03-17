@@ -1,0 +1,29 @@
+FROM amazoncorretto:11-al2-jdk
+
+# Install Python 3.10 and pip
+RUN yum update -y && \
+    yum install -y python3.10 python3-pip && \
+    yum clean all
+
+# Explicitly set Java home
+ENV JAVA_HOME=/usr/lib/jvm/java-11-amazon-corretto
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY src/ ./src/
+COPY config/ ./config/
+COPY tests/ ./tests/
+
+# Create data directories
+RUN mkdir -p data/input data/output
+
+# Default command
+CMD ["python3.10", "-c", "print('Container ready. Run: docker-compose run --rm spark-dev python3.10 src/main.py config/metadata.yaml')"]

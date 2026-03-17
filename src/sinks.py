@@ -6,6 +6,7 @@ Registry pattern: easy to add formats.
 """
 
 from pyspark.sql import DataFrame
+from delta.tables import DeltaTable
 from pathlib import Path
 from typing import Dict, Callable, Any
 
@@ -25,6 +26,15 @@ def write_delta(df: DataFrame, path: str, mode: str) -> None:
     """
     df.write.format('delta').mode(mode).save(path)
 
+    # Get existing session from DataFrame
+    spark = df.sparkSession
+    spark.conf.set("spark.databricks.delta.retentionDurationCheck.enabled", "false")
+    # VACUUM using DeltaTable API
+    # Use file:// URI
+    file_uri = f"file://{Path(path).resolve()}"
+    DeltaTable.forPath(spark, file_uri).vacuum(0.05)
+    #DeltaTable.forPath(df.sparkSession, path).vacuum(0.5)  # Retention period in hours
+
 
 def write_parquet(df: DataFrame, path: str, mode: str) -> None:
     """
@@ -37,6 +47,7 @@ def write_parquet(df: DataFrame, path: str, mode: str) -> None:
         path: Output path
         mode: SaveMode
     """
+    
     df.write.format('parquet').mode(mode).save(path)
 
 
@@ -95,6 +106,6 @@ def write_sink(
         if '..' in path:
             raise SecurityError(f"Path traversal detected: {path}")
     
-    # Write to each path
+    # Write to each path  
     for path in paths:
         writer(df, path, mode)

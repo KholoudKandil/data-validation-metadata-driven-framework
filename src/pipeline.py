@@ -91,11 +91,13 @@ class DataFlowExecutor:
         source_name = source['name']
         path = source['path']
         format = source['format'].lower()
+        options = source.get('options', {})  
         
         logger.info(f"  Loading {source_name} from {path} (format: {format})")
         
         try:
-            df = self.spark.read.format(format).load(path)
+            
+            df = self.spark.read.format(format).options(**options).load(path)
             self.dataframes[source_name] = df
             
             row_count = df.count()  # This triggers action, shows rows loaded
@@ -104,8 +106,7 @@ class DataFlowExecutor:
         except Exception as e:
             raise TransformationError(
                 f"Failed to load source '{source_name}': {e}"
-            )
-    
+            )  
     def _apply_transformation(self, transformation: Dict[str, Any]) -> None:
         """
         Apply transformation to DataFrame.
@@ -134,7 +135,11 @@ class DataFlowExecutor:
             input_df = self.dataframes[input_name]
             
             # Execute transformation
-            output_dfs = transform_func(input_df, params, self.dataframes)
+            # Pass transformation name for proper output naming
+            if trans_type == 'add_fields':
+                output_dfs = transform_func(input_df, params, self.dataframes, trans_name)
+            else:
+                output_dfs = transform_func(input_df, params, self.dataframes)
             
             # Store output DataFrames
             for output_name, output_df in output_dfs.items():

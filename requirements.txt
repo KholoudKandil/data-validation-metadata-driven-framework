@@ -1,5 +1,6 @@
 # Core data processing
-pyspark==3.5.1
+pyspark==3.5.3
+delta-spark==3.3.2
 
 # Configuration management
 pyyaml==6.0.1

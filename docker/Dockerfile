@@ -1,29 +1,28 @@
-FROM python:3.10-slim
+FROM eclipse-temurin:11-jdk-focal
 
-# Install Java (required for Spark)
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=C.UTF-8
+
 RUN apt-get update && apt-get install -y \
-    openjdk-17-jdk-headless \
-    && rm -rf /var/lib/apt/lists/*
+    python3.8 \
+    python3-pip && \
+    apt-get clean
 
-# Set Java home
-ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+ENV JAVA_HOME=/opt/java/openjdk
+ENV PYTHONPATH=/app:$PYTHONPATH
 
-# Set working directory
+# Configure PySpark to load Delta 3.3.2 (compatible with Spark 3.5.3+)
+ENV PYSPARK_SUBMIT_ARGS="--packages io.delta:delta-spark_2.12:3.3.2 pyspark-shell"
+
 WORKDIR /app
 
-# Copy requirements
 COPY requirements.txt .
-
-# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
 COPY src/ ./src/
 COPY config/ ./config/
 COPY tests/ ./tests/
 
-# Create data directories
 RUN mkdir -p data/input data/output
 
-# Default command
-CMD ["python", "-c", "print('Container ready. Run: docker exec <container> python main.py')"]
+CMD ["python3.8", "-c", "print('Container ready.')"]
