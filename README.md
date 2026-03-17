@@ -175,3 +175,4 @@ This project is portable and executable on any machine:
 ## Contact
 
 Questions? Check the code comments or review the test cases.
+Find me at kholoudkandel@gmail.com
