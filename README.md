@@ -158,15 +158,6 @@ pytest tests/ --cov=src
 pytest tests/test_validators.py::TestValidators::test_validate_notEmpty_passes_non_empty -v
 ```
 
-## Next Steps (if time permits)
-
-- [ ] Add Pydantic for stricter config validation
-- [ ] Add more validators (regex, range, etc.)
-- [ ] Add more transformations (deduplicate, join, etc.)
-- [ ] Add more sink formats (Iceberg, Hudi, JDBC)
-- [ ] Add comprehensive error recovery
-- [ ] Add metrics/monitoring
-
 ## Portability & Delivery
 
 This project is portable and executable on any machine:
