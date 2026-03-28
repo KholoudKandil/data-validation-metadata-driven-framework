@@ -3,65 +3,149 @@ Output sinks: how to write data to different formats.
 
 Purpose: Abstract away format-specific details.
 Registry pattern: easy to add formats.
+
+Deduplication strategy:
+- DELTA + APPEND + uniqueKey: Use Delta MERGE (upsert) for deduplication
+- Other formats: Standard write (dedup not supported)
 """
 
 from pyspark.sql import DataFrame
 from delta.tables import DeltaTable
 from pathlib import Path
-from typing import Dict, Callable, Any
+from typing import Dict, Callable, Any, List, Optional
+import logging
 
 from src.exceptions import ConfigurationError, SecurityError
 
+logger = logging.getLogger(__name__)
 
-def write_delta(df: DataFrame, path: str, mode: str) -> None:
+
+def write_delta(
+    df: DataFrame, 
+    path: str, 
+    mode: str,
+    unique_key: Optional[List[str]] = None
+) -> None:
     """
     Write DataFrame to Delta Lake format.
     
-    Performance note: Delta is optimized for ACID operations and schema enforcement.
+    If APPEND mode + unique_key specified: Use MERGE (upsert) for deduplication.
+    This implements key-based deduplication: newer records overwrite older ones.
     
     Args:
         df: DataFrame to write
         path: Output path
         mode: SaveMode (OVERWRITE, APPEND, etc.)
+        unique_key: List of columns that identify unique records (for APPEND dedup)
     """
-    df.write.format('delta').mode(mode).save(path)
-
-    # Get existing session from DataFrame
     spark = df.sparkSession
+    
+    # Strategy 1: APPEND + unique_key → Use Delta MERGE (upsert)
+    if mode == 'APPEND' and unique_key:
+        try:
+            # Attempt to load existing Delta table
+            delta_table = DeltaTable.forPath(spark, path)
+            
+            # Build merge condition: t.key1 = s.key1 AND t.key2 = s.key2
+            merge_conditions = [f"t.{col} = s.{col}" for col in unique_key]
+            merge_condition = " AND ".join(merge_conditions)
+            
+            logger.info(f"    Using Delta MERGE for deduplication on: {unique_key}")
+            
+            # Build explicit column mappings
+            # Only includes columns present in source DataFrame
+            update_dict = {col: f"s.{col}" for col in df.columns}
+            insert_dict = {col: f"s.{col}" for col in df.columns}
+            
+            # MERGE (upsert): Update if key exists, insert if new
+            delta_table.alias("t").merge(
+                df.alias("s"),
+                merge_condition
+            ).whenMatchedUpdate(
+                set=update_dict
+                # When keys match: update only columns present in source
+            ).whenNotMatchedInsert(
+                values=insert_dict
+                # When keys don't match: insert entire row
+            ).execute()
+            
+            logger.info(f"    ✓ MERGE completed successfully")
+        
+        except Exception as e:
+            error_msg = str(e).lower()
+            if any(msg in error_msg for msg in ["not found", "doesn't exist", "not a delta table"]):
+                # Create table ✅
+                logger.info(f"    Delta table not found. Creating new table at {path}")
+                df.write.format('delta').mode('overwrite').save(path)
+            else:
+                raise
+
+    
+    else:
+        # Strategy 2: OVERWRITE, IGNORE, ERROR, or other modes → Standard write
+        if unique_key and mode != 'APPEND':
+            logger.warning(
+                f"    uniqueKey specified but saveMode='{mode}'. "
+                f"Deduplication only applies to APPEND mode. Proceeding with {mode}."
+            )
+        
+        df.write.format('delta').mode(mode).save(path)
+    
+    # Cleanup: VACUUM to remove old files (Delta best practice)
     spark.conf.set("spark.databricks.delta.retentionDurationCheck.enabled", "false")
-    # VACUUM using DeltaTable API
-    # Use file:// URI
     file_uri = f"file://{Path(path).resolve()}"
     DeltaTable.forPath(spark, file_uri).vacuum(0.05)
-    #DeltaTable.forPath(df.sparkSession, path).vacuum(0.5)  # Retention period in hours
 
 
-def write_parquet(df: DataFrame, path: str, mode: str) -> None:
+def write_parquet(
+    df: DataFrame, 
+    path: str, 
+    mode: str,
+    unique_key: Optional[List[str]] = None
+) -> None:
     """
     Write DataFrame to Parquet format.
     
-    Performance note: Parquet is columnar format, great for analytics.
+    Note: Parquet doesn't support MERGE. Deduplication not applied.
     
     Args:
         df: DataFrame to write
         path: Output path
         mode: SaveMode
+        unique_key: Ignored for Parquet (not supported)
     """
+    if unique_key:
+        logger.warning(
+            f"    uniqueKey specified for Parquet format, but Parquet "
+            f"doesn't support MERGE deduplication. Proceeding without dedup."
+        )
     
     df.write.format('parquet').mode(mode).save(path)
 
 
-def write_csv(df: DataFrame, path: str, mode: str) -> None:
+def write_csv(
+    df: DataFrame, 
+    path: str, 
+    mode: str,
+    unique_key: Optional[List[str]] = None
+) -> None:
     """
     Write DataFrame to CSV format.
     
-    Note: CSV is slower than Parquet/Delta for large files (text-based).
+    Note: CSV doesn't support MERGE. Deduplication not applied.
     
     Args:
         df: DataFrame to write
         path: Output path
         mode: SaveMode
+        unique_key: Ignored for CSV (not supported)
     """
+    if unique_key:
+        logger.warning(
+            f"    uniqueKey specified for CSV format, but CSV "
+            f"doesn't support MERGE deduplication. Proceeding without dedup."
+        )
+    
     df.write.format('csv').option('header', True).mode(mode).save(path)
 
 
@@ -70,7 +154,6 @@ SINK_WRITERS: Dict[str, Callable] = {
     'DELTA': write_delta,
     'PARQUET': write_parquet,
     'CSV': write_csv,
-    # Can add: 'JDBC': write_jdbc, 'KAFKA': write_kafka, etc.
 }
 
 
@@ -78,19 +161,26 @@ def write_sink(
     df: DataFrame,
     format: str,
     paths: list,
-    mode: str = 'OVERWRITE'
+    mode: str = 'OVERWRITE',
+    unique_key: Optional[List[str]] = None
 ) -> None:
     """
     Write DataFrame to sink(s) in specified format.
+    
+    Deduplication strategy (for APPEND mode):
+    - Delta: Uses native MERGE (upsert) if uniqueKey provided
+    - Parquet/CSV: No deduplication support (standard write)
     
     Args:
         df: DataFrame to write
         format: Output format (DELTA, PARQUET, CSV)
         paths: List of output paths (usually 1, but support multiple)
         mode: SaveMode (OVERWRITE, APPEND, IGNORE, ERROR)
+        unique_key: Optional list of columns that identify unique records
+                   (for APPEND mode deduplication in Delta)
         
     Raises:
-        ConfigurationError: If format not supported
+        ConfigurationError: If format not supported or config invalid
         SecurityError: If path is suspicious
     """
     if format not in SINK_WRITERS:
@@ -101,11 +191,11 @@ def write_sink(
     
     writer = SINK_WRITERS[format]
     
-    # Security: validate each path
+    # Security: validate each path (prevent path traversal attacks)
     for path in paths:
         if '..' in path:
             raise SecurityError(f"Path traversal detected: {path}")
     
-    # Write to each path  
+    # Write to each path
     for path in paths:
-        writer(df, path, mode)
+        writer(df, path, mode, unique_key)

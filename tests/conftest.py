@@ -1,37 +1,39 @@
-"""Test fixtures and sample data."""
+"""
+Pytest configuration and shared fixtures.
+
+Provides SparkSession and test data for all test modules.
+"""
 
 import pytest
-from pyspark.sql import SparkSession
-import tempfile
-from pathlib import Path
+from pyspark.sql import SparkSession, functions as F
 
 
 @pytest.fixture(scope="session")
 def spark():
     """
-    Create Spark session for tests.
+    Create a SparkSession for testing.
     
-    Session scope means one Spark session for all tests (efficient).
+    Scope: session - reused across all tests for performance.
     """
-    spark_session = SparkSession.builder \
+    spark = SparkSession.builder \
         .appName("MetadataFrameworkTests") \
         .master("local[1]") \
-        .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension") \
-        .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog") \
+        .config("spark.driver.host", "127.0.0.1") \
+        .config("spark.driver.bindAddress", "127.0.0.1") \
+        .config("spark.sql.shuffle.partitions", "1") \
         .getOrCreate()
-    yield spark_session
-    spark_session.stop()
+    
+    yield spark
+    
+    spark.stop()
 
 
 @pytest.fixture
 def sample_data():
     """
-    Sample test data matching the SDG specification.
+    Sample person data matching the test specification.
     
-    Three records:
-    - Xabier: empty office (fails validation)
-    - Miguel: null age (fails validation)
-    - Fran: valid data (passes validation)
+    Used for creating DataFrames in tests.
     """
     return [
         {"name": "Xabier", "age": 39, "office": ""},
@@ -43,38 +45,43 @@ def sample_data():
 @pytest.fixture
 def sample_df(spark, sample_data):
     """
-    Create DataFrame from sample data.
+    Sample DataFrame created from sample_data.
     
-    This DataFrame is used in most tests.
+    Provides a clean DataFrame for transformation tests.
     """
     return spark.createDataFrame(sample_data)
 
 
 @pytest.fixture
-def temp_yaml_config():
+def sample_data_with_duplicates():
     """
-    Create temporary YAML config file for testing.
+    Sample data with duplicate records (same name, different data).
     
-    Lifecycle:
-    1. Create temp file
-    2. Write valid YAML
-    3. yield filename to test
-    4. Delete after test
+    Used for testing deduplication logic.
     """
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False, encoding='utf-8') as f:
-        f.write("""
-dataflows:
-  - name: test_dataflow
-    sources:
-      - name: test_source
-        path: "data/input/test.json"
-        format: JSON
-    transformations: []
-    sinks: []
-""")
-        temp_path = f.name
+    return [
+        {"name": "Alice", "age": 30, "office": "NYC"},
+        {"name": "Alice", "age": 31, "office": "BOSTON"},
+        {"name": "Bob", "age": 25, "office": "NYC"},
+    ]
+
+
+@pytest.fixture
+def sample_df_with_duplicates(spark, sample_data_with_duplicates):
+    """
+    DataFrame with duplicate records.
     
-    yield temp_path
+    Used for testing MERGE deduplication behavior.
+    """
+    return spark.createDataFrame(sample_data_with_duplicates)
+
+
+@pytest.fixture
+def sample_df_with_timestamp(spark, sample_data):
+    """
+    Sample DataFrame with timestamp column added.
     
-    # Cleanup
-    Path(temp_path).unlink(missing_ok=True)
+    Simulates output of add_fields transformation.
+    """
+    df = spark.createDataFrame(sample_data)
+    return df.withColumn("dt", F.current_timestamp())

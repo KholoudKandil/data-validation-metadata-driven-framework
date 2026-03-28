@@ -170,7 +170,12 @@ class ConfigLoader:
             )
     
     def _validate_sink(self, sink: Dict) -> None:
-        """Validate sink configuration."""
+        """
+        Validate sink configuration.
+        
+        Raises:
+            ConfigurationError: If sink config is invalid
+        """
         required = {'input', 'name', 'paths', 'format'}
         if not all(key in sink for key in required):
             raise ConfigurationError(
@@ -184,6 +189,35 @@ class ConfigLoader:
         
         if not isinstance(sink['paths'], list):
             raise ConfigurationError("Sink 'paths' must be a list")
+        
+        # NEW: Validate uniqueKey if present
+        if 'uniqueKey' in sink:
+            if not isinstance(sink['uniqueKey'], list):
+                raise ConfigurationError(
+                    f"Sink '{sink['name']}': 'uniqueKey' must be a list of column names"
+                )
+            
+            if not sink['uniqueKey']:
+                raise ConfigurationError(
+                    f"Sink '{sink['name']}': 'uniqueKey' cannot be empty"
+                )
+            
+            # Validate uniqueKey usage: only makes sense with APPEND mode
+            save_mode = sink.get('saveMode', 'OVERWRITE')
+            if save_mode != 'APPEND':
+                raise ConfigurationError(
+                    f"Sink '{sink['name']}': 'uniqueKey' is only applicable with "
+                    f"saveMode='APPEND'. Current mode: '{save_mode}'. "
+                    f"(Remove uniqueKey for {save_mode} mode, or change saveMode to APPEND)"
+                )
+            
+            # Validate uniqueKey only works well with Delta
+            if sink['format'] != 'DELTA':
+                raise ConfigurationError(
+                    f"Sink '{sink['name']}': 'uniqueKey' with APPEND mode is only "
+                    f"supported for format='DELTA'. Current format: '{sink['format']}'. "
+                    f"(Parquet/CSV don't support MERGE operations)"
+                )
         
         # Security: validate all paths
         for path in sink['paths']:

@@ -96,17 +96,17 @@ class DataFlowExecutor:
         logger.info(f"  Loading {source_name} from {path} (format: {format})")
         
         try:
-            
             df = self.spark.read.format(format).options(**options).load(path)
             self.dataframes[source_name] = df
             
-            row_count = df.count()  # This triggers action, shows rows loaded
+            row_count = df.count()
             logger.info(f"    ✓ Loaded {row_count} rows")
         
         except Exception as e:
             raise TransformationError(
                 f"Failed to load source '{source_name}': {e}"
-            )  
+            )
+    
     def _apply_transformation(self, transformation: Dict[str, Any]) -> None:
         """
         Apply transformation to DataFrame.
@@ -163,6 +163,7 @@ class DataFlowExecutor:
         paths = sink['paths']
         format = sink['format']
         mode = sink.get('saveMode', 'OVERWRITE')
+        unique_key = sink.get('uniqueKey')
         
         logger.info(f"  Writing sink: {sink_name}")
         
@@ -175,10 +176,14 @@ class DataFlowExecutor:
             
             df = self.dataframes[input_name]
             
+            # Log deduplication info
+            if unique_key and mode == 'APPEND':
+                logger.info(f"    Deduplicating on keys: {unique_key}")
+            
             # Write to all paths
             for path in paths:
                 logger.info(f"    Writing to {path} ({format}, mode={mode})")
-                write_sink(df, format, [path], mode)
+                write_sink(df, format, [path], mode, unique_key)
             
             logger.info(f"    ✓ Sink '{sink_name}' completed")
         
