@@ -77,7 +77,7 @@ def write_delta(
                 # Create table ✅
                 logger.info(f"    Delta table not found. Creating new table at {path}")
                 df.write.format('delta').mode('overwrite').save(path)
-            else:
+            else: 
                 raise
 
     
