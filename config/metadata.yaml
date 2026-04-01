@@ -31,8 +31,8 @@ dataflows:
         paths:
           - "data/output/events/person"
         format: DELTA
-        saveMode: APPEND
-        uniqueKey: [name]
+        saveMode: OVERWRITE
+        #uniqueKey: [name]
         # uniqueKey: Use Delta MERGE for deduplication on APPEND mode
         # When same 'name' appears in multiple runs:
         #   - First run: Inserts all rows
@@ -47,6 +47,6 @@ dataflows:
         paths:
           - "data/output/discards/person"
         format: DELTA
-        saveMode: APPEND
-        uniqueKey: [name]
+        saveMode: OVERWRITE
+        #uniqueKey: [name]
         # Note: No uniqueKey needed for OVERWRITE (overwrites entire table)

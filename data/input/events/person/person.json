@@ -1,5 +1,6 @@
 [
   { "name": "Xabier", "age": 39, "office": "" },
   { "name": "Miguel", "age": null, "office": "RIO" },
-  { "name": "Fran", "age": 31, "office": "RIO" }
+  { "name": "Fran", "age": 31, "office": "RIO" },
+  { "name": "Kholoud", "age": 30, "office": "Cairo" }
 ]

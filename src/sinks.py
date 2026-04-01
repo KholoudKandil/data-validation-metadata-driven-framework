@@ -42,59 +42,58 @@ def write_delta(
     
     # Strategy 1: APPEND + unique_key → Use Delta MERGE (upsert)
     if mode == 'APPEND' and unique_key:
+        # BETTER: Proactive Check + Reactive Fallback
+
         try:
-            # Attempt to load existing Delta table
-            delta_table = DeltaTable.forPath(spark, path)
-            
-            # Build merge condition: t.key1 = s.key1 AND t.key2 = s.key2
-            merge_conditions = [f"t.{col} = s.{col}" for col in unique_key]
-            merge_condition = " AND ".join(merge_conditions)
-            
-            logger.info(f"    Using Delta MERGE for deduplication on: {unique_key}")
-            
-            # Build explicit column mappings
-            # Only includes columns present in source DataFrame
-            update_dict = {col: f"s.{col}" for col in df.columns}
-            insert_dict = {col: f"s.{col}" for col in df.columns}
-            
-            # MERGE (upsert): Update if key exists, insert if new
-            delta_table.alias("t").merge(
-                df.alias("s"),
-                merge_condition
-            ).whenMatchedUpdate(
-                set=update_dict
-                # When keys match: update only columns present in source
-            ).whenNotMatchedInsert(
-                values=insert_dict
-                # When keys don't match: insert entire row
-            ).execute()
-            
-            logger.info(f"    ✓ MERGE completed successfully")
+            # CHECK if table exists and is valid BEFORE attempting merge
+            if DeltaTable.isDeltaTable(spark, path):
+                # Table exists and is valid Delta table - proceed with merge
+                delta_table = DeltaTable.forPath(spark, path)
+                
+                merge_conditions = [f"t.{col} = s.{col}" for col in unique_key]
+                merge_condition = " AND ".join(merge_conditions)
+                
+                logger.info(f"    Using Delta MERGE for deduplication on: {unique_key}")
+                
+                update_dict = {col: f"s.{col}" for col in df.columns}
+                insert_dict = {col: f"s.{col}" for col in df.columns}
+                
+                delta_table.alias("t").merge(
+                    df.alias("s"),
+                    merge_condition
+                ).whenMatchedUpdate(
+                    set=update_dict
+                ).whenNotMatchedInsert(
+                    values=insert_dict
+                ).execute()
+                
+                logger.info(f"    ✓ MERGE completed successfully")
+            else:
+                # Table doesn't exist or is invalid - create new
+                logger.info(f"    Table doesn't exist or is invalid. Creating with initial data.")
+                df.write.format('delta').mode('overwrite').save(path)
         
         except Exception as e:
-            error_msg = str(e).lower()
-            if any(msg in error_msg for msg in ["not found", "doesn't exist", "not a delta table"]):
-                # Create table ✅
-                logger.info(f"    Delta table not found. Creating new table at {path}")
-                df.write.format('delta').mode('overwrite').save(path)
-            else: 
-                raise
+            # Catch unexpected errors (schema mismatches, permissions, etc.)
+            logger.error(f"    Unexpected error during Delta write: {str(e)}")
+            raise
 
     
-    else:
+    elif mode == 'OVERWRITE':
         # Strategy 2: OVERWRITE, IGNORE, ERROR, or other modes → Standard write
-        if unique_key and mode != 'APPEND':
-            logger.warning(
-                f"    uniqueKey specified but saveMode='{mode}'. "
-                f"Deduplication only applies to APPEND mode. Proceeding with {mode}."
-            )
-        
+        logger.info(f" Proceeding with {mode}."
+        )
+    
         df.write.format('delta').mode(mode).save(path)
+    
+    else:
+        logger.info(f"No uniqueKey provided or invalid write mode.")
+
     
     # Cleanup: VACUUM to remove old files (Delta best practice)
     spark.conf.set("spark.databricks.delta.retentionDurationCheck.enabled", "false")
     file_uri = f"file://{Path(path).resolve()}"
-    DeltaTable.forPath(spark, file_uri).vacuum(0.05)
+    DeltaTable.forPath(spark, file_uri).vacuum(0.05) # Vacuum after 3 minutes
 
 
 def write_parquet(
