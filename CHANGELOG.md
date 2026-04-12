@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.0] - 2026-04-12
+
+### Performance
+- Cache DataFrame before OK/KO split in `transform_validate_fields` to avoid double full scan — reduces I/O and compute by 2x on validation runs
+
 ## [1.0.0] - 2026-03-29
 
 ### Added

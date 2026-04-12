@@ -77,19 +77,23 @@ def transform_validate_fields(
     if all_valid is None:
         all_valid = F.lit(True)
     
+    # Cache before split so both filters share one scan instead of two
+    df.cache()
+
     # Split into OK and KO
     df_ok = df.filter(all_valid)
-    
+
     # Add error message column to failed rows
     # Use concat_ws to combine error messages
     error_col = F.concat_ws(
         ' | ',
         *[expr for expr in error_expressions if expr is not None]
     )
-    
+
     df_ko = df.filter(~all_valid).withColumn('error_code', error_col)
-    
+
     # Return with hardcoded names matching config specification
+    # Caller should invoke df.unpersist() after both DataFrames are written
     return {
         "validation_ok": df_ok,
         "validation_ko": df_ko,
